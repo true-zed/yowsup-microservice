@@ -4,11 +4,12 @@ import pexpect
 import logging
 
 from nameko.extensions import DependencyProvider
+from yowsup.config.manager import ConfigManager
 from yowsup.layers.network import YowNetworkLayer
 from yowsup.layers.protocol_media import YowMediaProtocolLayer
 from yowsup.layers import YowLayerEvent
+from yowsup.profile.profile import YowProfile
 from yowsup.stacks import YowStackBuilder
-from yowsup.layers.auth import AuthError
 
 # from axolotl.duplicatemessagexception import DuplicateMessageException
 
@@ -18,38 +19,34 @@ from yowsup.layers.axolotl.props import PROP_IDENTITY_AUTOTRUST
 class YowsupExtension(DependencyProvider):
     def setup(self):
         number = str(self.container.config['YOWSUP_USERNAME'])
-        password = self.container.config['YOWSUP_PASSWORD']
+        cfg = self.container.config['YOWSUP_CONFIG']
+
         self.output('Starting YowsUP...' + number + '.')
 
         tokenReSendMessage = self.container.config['TOKEN_RESEND_MESSAGES']
         urlReSendMessage = self.container.config['ENDPOINT_RESEND_MESSAGES']
 
-        credentials = (number, password)  # replace with your phone and password
-
         stackBuilder = YowStackBuilder()
         self.stack = stackBuilder \
-            .pushDefaultLayers(True) \
+            .pushDefaultLayers() \
             .push(SendReciveLayer(tokenReSendMessage,urlReSendMessage,number)) \
             .build()
 
- 
-        self.stack.setCredentials(credentials)
+        config_manager = ConfigManager()
+        config = config_manager.load_data(cfg)
+        profile = YowProfile(profile_name=number, config=config)
+        self.stack.setProfile(profile)
+
         self.stack.setProp(PROP_IDENTITY_AUTOTRUST, True)
-        #self.stack.broadcastEvent(YowLayerEvent(YowsupCliLayer.EVENT_START))
-
-
 
         connectEvent = YowLayerEvent(YowNetworkLayer.EVENT_STATE_CONNECT)
         self.stack.broadcastEvent(connectEvent)
 
-
         def startThread():
             try:
                 self.stack.loop(timeout=0.5, discrete=0.5)
-            except AuthError as e:
-                self.output("Auth Error, reason %s" % e)
-            except ValueError as e:  
-                self.output(e);              
+            except ValueError as e:
+                self.output(e)
             except KeyboardInterrupt:
                 self.output("\nYowsdown KeyboardInterrupt")
                 exit(0)

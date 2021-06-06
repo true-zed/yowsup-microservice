@@ -1,3 +1,4 @@
+import base64
 from yowsup.layers.interface import YowInterfaceLayer, ProtocolEntityCallback
 from yowsup.layers.auth import YowAuthenticationProtocolLayer
 from yowsup.layers import YowLayerEvent, EventCallback
@@ -19,7 +20,7 @@ from yowsup.layers.protocol_media.protocolentities import *
 from yowsup.layers.protocol_media.mediauploader import MediaUploader
 from yowsup.layers.protocol_profiles.protocolentities import *
 from yowsup.common.tools import Jid
-from yowsup.common.optionalmodules import PILOptionalModule, AxolotlOptionalModule
+from yowsup.common.optionalmodules import PILOptionalModule
 import urllib.request
 
 logger = logging.getLogger(__name__)
@@ -129,7 +130,10 @@ class SendReciveLayer(YowInterfaceLayer):
             self.output("From :%s, Type: %s" % (self.jidToAlias(notification.getFrom()), notification.getType()),
                         tag="Notification")
         if self.sendReceipts:
-            self.toLower(notification.ack())
+            try:
+                self.toLower(notification.ack())
+            except Exception as e:
+                self.output(e)
 
     @ProtocolEntityCallback("message")
     def onMessage(self, message):
@@ -191,19 +195,23 @@ class SendReciveLayer(YowInterfaceLayer):
             self.toLower(outgoingMessage)
 
     def getTextMessageBody(self, message):
-        return message.getBody()
+        if isinstance(message, TextMessageProtocolEntity):
+            return message.conversation
+        elif isinstance(message, ExtendedTextMessageProtocolEntity):
+            return str(message.message_attributes.extended_text)
+        else:
+            raise NotImplementedError()
 
     def getMediaMessageBody(self, message):
-        if message.getMediaType() in ("image", "audio", "video"):
-            return self.getDownloadableMediaMessageBody(message)
-        else:
-            return "[Media Type: %s]" % message.getMediaType()
+        # type: (DownloadableMediaMessageProtocolEntity) -> str
+        return str(message.message_attributes)
 
     def getDownloadableMediaMessageBody(self, message):
-        return "[Media Type:{media_type}, Size:{media_size}, URL:{media_url}]".format(
-            media_type=message.getMediaType(),
-            media_size=message.getMediaSize(),
-            media_url=message.getMediaUrl()
+        return "[media_type={media_type}, length={media_size}, url={media_url}, key={media_key}]".format(
+            media_type=message.media_type,
+            media_size=message.file_length,
+            media_url=message.url,
+            media_key=base64.b64encode(message.media_key)
         )
 
     ########### callbacks ############
