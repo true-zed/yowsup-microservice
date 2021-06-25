@@ -26,6 +26,8 @@ class CallbackSender:
     def __init__(self, url, login, pwd, msg_endpoint='messages/', jwt_endpoint='token/', logfile_path=None):
         self._logger = self.configure_logger(path_to_log_file=logfile_path)
 
+        self._logger.info((url, login, msg_endpoint, jwt_endpoint, logfile_path))
+        
         self.__url = url
         self.__msg_endpoint = path.join(url, msg_endpoint)
         self.__jwt_endpoint = path.join(url, jwt_endpoint)

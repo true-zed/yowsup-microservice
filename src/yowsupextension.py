@@ -30,7 +30,7 @@ class YowsupExtension(DependencyProvider):
         passwordReSendMessage = self.container.config['PASSWORD_RESEND_MESSAGES']
         urlReSendMessage = self.container.config['URL_RESEND_MESSAGES']
         logfile_path = self.container.config['LOG_FILE_PATH']
-        msg_endpoint = self.container.config['ENDPOINT_RESEND_MESSAGES'],
+        msg_endpoint = self.container.config['ENDPOINT_RESEND_MESSAGES']
         jwt_endpoint = self.container.config['ENDPOINT_RESEND_JWT']
 
         cs = CallbackSender(

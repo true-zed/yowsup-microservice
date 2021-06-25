@@ -57,3 +57,6 @@ src/__pycache__/
 *.env
 /env
 
+# Not now..
+pyproject.toml
+poetry.lock
