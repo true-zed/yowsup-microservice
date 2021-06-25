@@ -1,0 +1,5 @@
+nameko
+flask
+flasgger
+git+https://github.com/true-zed/yowsup@master
+pexpect

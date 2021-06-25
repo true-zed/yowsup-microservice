@@ -1,3 +1,6 @@
+import base64
+import encodings
+
 from yowsup.layers.interface import YowInterfaceLayer, ProtocolEntityCallback
 from yowsup.layers.auth import YowAuthenticationProtocolLayer
 from yowsup.layers import YowLayerEvent, EventCallback
@@ -19,7 +22,7 @@ from yowsup.layers.protocol_media.protocolentities import *
 from yowsup.layers.protocol_media.mediauploader import MediaUploader
 from yowsup.layers.protocol_profiles.protocolentities import *
 from yowsup.common.tools import Jid
-from yowsup.common.optionalmodules import PILOptionalModule, AxolotlOptionalModule
+from yowsup.common.optionalmodules import PILOptionalModule
 import urllib.request
 
 logger = logging.getLogger(__name__)
@@ -27,27 +30,23 @@ logger = logging.getLogger(__name__)
 
 class SendReciveLayer(YowInterfaceLayer):
 
-
-    MESSAGE_FORMAT = "{{\"from\":\"{FROM}\",\"to\":\"{TO}\",\"time\":\"{TIME}\",\"id\":\"{MESSAGE_ID}\",\"message\":\"{MESSAGE}\",\"type\":\"{TYPE}\"}}"
-
     DISCONNECT_ACTION_PROMPT = 0
 
     EVENT_SEND_MESSAGE = "org.openwhatsapp.yowsup.prop.queue.sendmessage"
     
-    def __init__(self,tokenReSendMessage,urlReSendMessage,myNumber):
+    def __init__(self, cs, myNumber):
         super(SendReciveLayer, self).__init__()
         YowInterfaceLayer.__init__(self)
         self.accountDelWarnings = 0
-        self.connected = False
+        self.connected = True
         self.username = None
         self.sendReceipts = True
         self.sendRead = True
         self.disconnectAction = self.__class__.DISCONNECT_ACTION_PROMPT
-        self.myNumber=myNumber
+        self.myNumber = myNumber
         self.credentials = None
         
-        self.tokenReSendMessage=tokenReSendMessage
-        self.urlReSendMessage=urlReSendMessage
+        self.cs = cs
 
         # add aliases to make it user to use commands. for example you can then do:
         # /message send foobar "HI"
@@ -57,9 +56,11 @@ class SendReciveLayer(YowInterfaceLayer):
         }
 
     def aliasToJid(self, calias):
+        for alias, ajid in self.jidAliases.items():
+            if calias.lower() == alias.lower():
+                return Jid.normalize(ajid)
 
-        jid = "%s@s.whatsapp.net" % calias
-        return jid
+        return Jid.normalize(calias)
 
     def jidToAlias(self, jid):
         for alias, ajid in self.jidAliases.items():
@@ -129,54 +130,64 @@ class SendReciveLayer(YowInterfaceLayer):
             self.output("From :%s, Type: %s" % (self.jidToAlias(notification.getFrom()), notification.getType()),
                         tag="Notification")
         if self.sendReceipts:
-            self.toLower(notification.ack())
+            try:
+                self.toLower(notification.ack())
+            except Exception as e:
+                self.output(e)
 
     @ProtocolEntityCallback("message")
     def onMessage(self, message):
 
-        messageOut = ""
-        if message.getType() == "text":
-            messageOut = self.getTextMessageBody(message)
-        elif message.getType() == "media":
-            messageOut = self.getMediaMessageBody(message)
+        message_out = {'source': 'gm' if message.isGroupMessage() else 'pm',
+                       'msg_id': str(message.getId()),
+                       'msg_time': str(message.getTimestamp())}
+
+        if message_out['source'] == 'pm':
+            message_out['sender'] = str(message.getFrom(full=False))
+            message_out['chat'] = str(self.myNumber)
         else:
-            messageOut = "Unknown message type %s " % message.getType()
+            message_out['sender'] = str(message.getParticipant(full=False))
+            message_out['chat'] = str(message.getFrom(full=False))
 
-        formattedDate = datetime.datetime.fromtimestamp(message.getTimestamp()).strftime('%Y-%m-%d %H:%M:%S')
-        sender = message.getFrom() if not message.isGroupMessage() else "%s/%s" % (
-            message.getParticipant(False), message.getFrom())
-               
-        # convert message to json
-        output = self.__class__.MESSAGE_FORMAT.format(
-            FROM=sender,
-            TO=self.myNumber,
-            TIME=formattedDate,
-            MESSAGE=messageOut.encode('utf8').decode() if sys.version_info >= (3, 0) else messageOut,
-            MESSAGE_ID=message.getId(),
-            TYPE=message.getType()
-        )
+        if message.message_attributes.extended_text:
+            message_out['replied_msg_id'] = \
+                str(message.message_attributes.extended_text.context_info.stanza_id)
 
-        req = urllib.request.Request(self.urlReSendMessage)
-        req.add_header('Content-Type', 'application/json; charset=utf-8')
+        if message.getType() == 'text':
+            if message.message_attributes.extended_text:
+                message_out['content'] = str(message.message_attributes.extended_text.text)
+            else:
+                message_out['content'] = str(message.conversation)
 
-        jsondataasbytes = output.encode('utf-8')   # needs to be bytes
-        req.add_header('Content-Length', len(jsondataasbytes))
-        req.add_header('TOKEN', self.tokenReSendMessage )
+        if message.getType() == 'media':
+            # TODO: Try this
+            #  getattr()
+            message_out['msg_media'] = {
+                'url': str(message.url),
+                'ref_key': base64.b64encode(message.media_key),
+                'media_type': str(message.media_type)
+            }
 
-        # resend message to url from configuration
-        try:
-            response = urllib.request.urlopen(req, jsondataasbytes)
-            self.output(response.info())
-        except Exception as e:
-            self.output(e)
-        
-        self.output(output, tag=None, prompt=not self.sendReceipts)
+            if message.media_type == 'image':
+                message_out['content'] = str(message.caption)
+                message_out['msg_media']['mimetype'] = message.message_attributes.image.downloadablemedia_attributes.mimetype
+            if message.media_type == 'ptt':
+                message_out['msg_media']['mimetype'] = message.message_attributes.audio.downloadablemedia_attributes.mimetype
+            if message.media_type == 'audio':
+                message_out['msg_media']['mimetype'] = message.message_attributes.audio.downloadablemedia_attributes.mimetype
+            if message.media_type == 'document':
+                message_out['msg_media']['filename'] = message.message_attributes.document.file_name
+
+        print('=================Start=================')
+        print(message_out)
+        print('==================End==================')
+
+        print(self.cs.send_msg(**message_out))
 
         if self.sendReceipts:
             self.toLower(message.ack(self.sendRead))
             self.output("Sent delivered receipt" + " and Read" if self.sendRead else "",
                         tag="Message %s" % message.getId())
-
 
     @EventCallback(EVENT_SEND_MESSAGE)
     def doSendMesage(self, layerEvent):
@@ -189,21 +200,26 @@ class SendReciveLayer(YowInterfaceLayer):
             outgoingMessage = TextMessageProtocolEntity(
                 content.encode("utf-8") if sys.version_info >= (3, 0) else content, to=self.aliasToJid(number))
             self.toLower(outgoingMessage)
+    # TODO: Return message ID from here
 
     def getTextMessageBody(self, message):
-        return message.getBody()
+        if isinstance(message, TextMessageProtocolEntity):
+            return message.conversation
+        elif isinstance(message, ExtendedTextMessageProtocolEntity):
+            return str(message.message_attributes.extended_text)
+        else:
+            raise NotImplementedError()
 
     def getMediaMessageBody(self, message):
-        if message.getMediaType() in ("image", "audio", "video"):
-            return self.getDownloadableMediaMessageBody(message)
-        else:
-            return "[Media Type: %s]" % message.getMediaType()
+        # type: (DownloadableMediaMessageProtocolEntity) -> str
+        return str(message.message_attributes)
 
     def getDownloadableMediaMessageBody(self, message):
-        return "[Media Type:{media_type}, Size:{media_size}, URL:{media_url}]".format(
-            media_type=message.getMediaType(),
-            media_size=message.getMediaSize(),
-            media_url=message.getMediaUrl()
+        return "[media_type={media_type}, length={media_size}, url={media_url}, key={media_key}]".format(
+            media_type=message.media_type,
+            media_size=message.file_length,
+            media_url=message.url,
+            media_key=base64.b64encode(message.media_key)
         )
 
     ########### callbacks ############
