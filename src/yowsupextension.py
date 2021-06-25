@@ -16,6 +16,9 @@ from yowsup.stacks import YowStackBuilder
 from src.layer import SendReciveLayer
 from yowsup.layers.axolotl.props import PROP_IDENTITY_AUTOTRUST
 
+from src.callback import CallbackSender
+
+
 class YowsupExtension(DependencyProvider):
     def setup(self):
         number = str(self.container.config['YOWSUP_USERNAME'])
@@ -23,13 +26,26 @@ class YowsupExtension(DependencyProvider):
 
         self.output('Starting YowsUP...' + number + '.')
 
-        tokenReSendMessage = self.container.config['TOKEN_RESEND_MESSAGES']
-        urlReSendMessage = self.container.config['ENDPOINT_RESEND_MESSAGES']
+        loginReSendMessage = self.container.config['LOGIN_RESEND_MESSAGES']
+        passwordReSendMessage = self.container.config['PASSWORD_RESEND_MESSAGES']
+        urlReSendMessage = self.container.config['URL_RESEND_MESSAGES']
+        logfile_path = self.container.config['LOG_FILE_PATH']
+        msg_endpoint = self.container.config['ENDPOINT_RESEND_MESSAGE'],
+        jwt_endpoint = self.container.config['ENDPOINT_RESEND_JWT']
+
+        cs = CallbackSender(
+            url=urlReSendMessage,
+            login=loginReSendMessage,
+            pwd=passwordReSendMessage,
+            logfile_path=logfile_path,
+            msg_endpoint=msg_endpoint,
+            jwt_endpoint=jwt_endpoint
+        )
 
         stackBuilder = YowStackBuilder()
         self.stack = stackBuilder \
             .pushDefaultLayers() \
-            .push(SendReciveLayer(tokenReSendMessage,urlReSendMessage,number)) \
+            .push(SendReciveLayer(cs, number)) \
             .build()
 
         config_manager = ConfigManager()
@@ -58,7 +74,6 @@ class YowsupExtension(DependencyProvider):
         t1 = threading.Thread(target=startThread)
         t1.daemon = True
         t1.start()
-
 
     def sendTextMessage(self, address,message):
         self.output('Trying to send Message to %s:%s' % (address, message))
